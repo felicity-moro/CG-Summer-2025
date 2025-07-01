@@ -131,8 +131,8 @@ double lerp(double a0, double a1, double w)
     assert(w >= 0);
     assert(w <= 1);
     //TODO implement linear and cubic interpolation
-    //return (a1 - a0) * (3.0 - w * 2.0) * w * w + a0;
-    return (1.0-w)*a0 + w*a1;
+    return (a1 - a0) * (3.0 - w * 2.0) * w * w + a0;
+    //return (1.0-w)*a0 + w*a1;
 }
 
 // Computes the dot product of the distance and gradient vectors.
@@ -156,8 +156,8 @@ double perlin(double x, double y)
     int y1 = y0 + 1;
 
     // Determine interpolation weights
-    double sx = x - x0;
-    double sy = y - y0;
+    double sx = x - (double)x0;
+    double sy = y - (double)y0;
 
     // Interpolate between grid point gradients
     double n0 = dotGridGradient(x0, y0, x, y);
@@ -184,10 +184,6 @@ Vector4d procedural_texture(const double tu, const double tv)
 
     //TODO: uncomment these lines once you implement the perlin noise
     const double color = (perlin(tu * grid_size, tv * grid_size) + 1) / 2;
-    return Vector4d(0, color, 0, 0);
-
-    //Example fo checkerboard texture
-    const double color = (int(tu * grid_size) + int(tv * grid_size)) % 2 == 0 ? 0 : 1;
     return Vector4d(0, color, 0, 0);
 }
 
