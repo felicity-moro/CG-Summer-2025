@@ -25,7 +25,7 @@ const std::string filename("raytrace.png");
 const double focal_length = 10;
 const double field_of_view = 0.7854; //45 degrees
 const double image_z = 5;
-const bool is_perspective = false;
+const bool is_perspective = true;
 const Vector3d camera_position(0, 0, 5);
 const double camera_aperture = 0.05;
 
@@ -131,24 +131,28 @@ double lerp(double a0, double a1, double w)
     assert(w >= 0);
     assert(w <= 1);
     //TODO implement linear and cubic interpolation
-    return 0;
+    //return (a1 - a0) * (3.0 - w * 2.0) * w * w + a0;
+    return (1.0-w)*a0 + w*a1;
 }
 
 // Computes the dot product of the distance and gradient vectors.
 double dotGridGradient(int ix, int iy, double x, double y)
 {
+    double dx = x - double(ix);
+    double dy = y - double(iy);
+
     //TODO: Compute the distance vector
     //TODO: Compute and return the dot-product
-    return 0;
+    return dx*grid[iy][ix][0] + dy*grid[iy][ix][1];
 }
 
 // Compute Perlin noise at coordinates x, y
 double perlin(double x, double y)
 {
     //TODO: Determine grid cell coordinates x0, y0
-    int x0 = 0;
+    int x0 = int(x);
     int x1 = x0 + 1;
-    int y0 = 0;
+    int y0 = int(y);
     int y1 = y0 + 1;
 
     // Determine interpolation weights
@@ -179,8 +183,8 @@ Vector4d procedural_texture(const double tu, const double tv)
     assert(tv <= 1);
 
     //TODO: uncomment these lines once you implement the perlin noise
-    // const double color = (perlin(tu * grid_size, tv * grid_size) + 1) / 2;
-    // return Vector4d(0, color, 0, 0);
+    const double color = (perlin(tu * grid_size, tv * grid_size) + 1) / 2;
+    return Vector4d(0, color, 0, 0);
 
     //Example fo checkerboard texture
     const double color = (int(tu * grid_size) + int(tv * grid_size)) % 2 == 0 ? 0 : 1;
@@ -200,22 +204,38 @@ double ray_sphere_intersection(const Vector3d &ray_origin, const Vector3d &ray_d
     const Vector3d sphere_center = sphere_centers[index];
     const double sphere_radius = sphere_radii[index];
 
-    double t = -1;
+    double a = ray_direction.dot(ray_direction);
+    double b = 2*ray_direction.dot(ray_origin - sphere_center);
+    double c = (ray_origin - sphere_center).dot((ray_origin - sphere_center)) - (sphere_radius*sphere_radius);
 
-    if (false)
+    double t = (b*b) - (4*a*c);
+    double t2 = t;
+
+    if (t < 0)
     {
         return -1;
     }
     else
     {
+        t = (-b - sqrt(t)) / (2*a);
+        t2 = (-b + sqrt(t2)) / (2*a);
+            
+        if (t < 0 && t2 >= 0){
+            t = t2;
+        }
+        else if (t2 < 0 && t >= 0){
+            t = t;
+        }
+        else if (t2 >= 0 && t >= 0){
+            t = std::min(t,t2);
+        }
         //TODO set the correct intersection point, update p to the correct value
-        p = ray_origin;
-        N = ray_direction;
+        p = ray_origin + t*ray_direction;
+        N = (p - sphere_center).normalized();
 
         return t;
     }
 
-    return -1;
 }
 
 //Compute the intersection between a ray and a paralleogram, return -1 if no intersection
@@ -230,16 +250,37 @@ double ray_parallelogram_intersection(const Vector3d &ray_origin, const Vector3d
     const Vector3d pgram_u = A - pgram_origin;
     const Vector3d pgram_v = B - pgram_origin;
 
-    if (false)
+    Vector3d ab = (pgram_u);
+    Vector3d ac = (pgram_v);
+    Vector3d d = (-ray_direction);
+
+            MatrixXd C(3, 3);
+            C << ab(0), ac(0), d(0),
+            ab(1), ac(1), d(1),
+            ab(2), ac(2), d(2);
+
+    Vector3d b = ray_origin - pgram_origin;
+    Vector3d sol = C.colPivHouseholderQr().solve(b);
+
+    double u = sol(0);
+    double v = sol(1);
+    double t = sol(2);
+
+    bool intersected = ((t > 0 && u >= 0 && v >= 0) && (u <= 1 && v <=1));
+            
+    if (!intersected)
     {
         return -1;
     }
 
     //TODO set the correct intersection point, update p and N to the correct values
-    p = ray_origin;
-    N = p.normalized();
+    p = ray_origin + t*ray_direction;
+    N = (pgram_u.cross(pgram_v)).normalized();
+    if (N.dot(ray_direction) > 0){
+        N = -N;
+    }
 
-    return -1;
+    return t;
 }
 
 //Finds the closest intersecting object returns its index
@@ -298,9 +339,23 @@ int find_nearest_object(const Vector3d &ray_origin, const Vector3d &ray_directio
 //Checks if the light is visible
 bool is_light_visible(const Vector3d &ray_origin, const Vector3d &ray_direction, const Vector3d &light_position)
 {
-    // TODO: Determine if the light is visible here
-    // Use find_nearest_object
-    return true;
+ Vector3d p;
+ Vector3d N;
+
+    int shad = find_nearest_object(ray_origin, ray_direction, p, N);
+
+    if (shad >= 0)
+    {
+        double tolight = (light_position - ray_origin).norm();
+        double toobj = (p - ray_origin).norm();
+
+        if (toobj < tolight - 1e-4)
+        {
+            return false;
+        }
+    }
+
+    return true; 
 }
 
 Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, int max_bounce)
@@ -325,10 +380,13 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
     {
         const Vector3d &light_position = light_positions[i];
         const Vector4d &light_color = light_colors[i];
-
+        Vector3d shadow_origin = p + 1e-4 * N;
         const Vector3d Li = (light_position - p).normalized();
 
-        // TODO: Shoot a shadow ray to determine if the light should affect the intersection point and call is_light_visible
+    if (!is_light_visible(shadow_origin, Li, light_position))
+    {
+        continue; 
+    } 
 
         Vector4d diff_color = obj_diffuse_color;
 
@@ -349,18 +407,24 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
             diff_color = procedural_texture(tu, tv);
         }
 
-        // TODO: Add shading parameters
-
         // Diffuse contribution
         const Vector4d diffuse = diff_color * std::max(Li.dot(N), 0.0);
 
         // Specular contribution, use obj_specular_color
-        const Vector4d specular(0, 0, 0, 0);
+
+        Vector3d V = -ray_direction.normalized();
+        Vector3d K = 2 * N.dot(Li) * N - (Li);
+        double spec = pow(std::max(V.dot(K), 0.0), obj_specular_exponent);
+
+        const Vector4d specular = obj_specular_color * spec;
 
         // Attenuate lights according to the squared distance to the lights
         const Vector3d D = light_position - p;
         lights_color += (diffuse + specular).cwiseProduct(light_color) / D.squaredNorm();
+        
+
     }
+    const Vector3d R = (ray_direction - (2 * N * (ray_direction.dot(N))));
 
     Vector4d refl_color = obj_reflection_color;
     if (nearest_object == 4)
@@ -369,7 +433,10 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
     }
     // TODO: Compute the color of the reflected ray and add its contribution to the current point color.
     // use refl_color
-    Vector4d reflection_color(0, 0, 0, 0);
+    Vector4d reflection_color(0,0,0,0);
+    if (max_bounce > 0){
+        reflection_color = refl_color.cwiseProduct(shoot_ray(p+R*1e-4,R.normalized(),max_bounce - 1));
+    }
 
     // TODO: Compute the color of the refracted ray and add its contribution to the current point color.
     //       Make sure to check for total internal reflection before shooting a new ray.
@@ -386,12 +453,13 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
 
 ////////////////////////////////////////////////////////////////////////////////
 
+
 void raytrace_scene()
 {
     std::cout << "Simple ray tracer." << std::endl;
-
-    int w = 800;
-    int h = 400;
+    int shorte = 1;
+    int w = 800/shorte;
+    int h = 400/shorte;
     MatrixXd R = MatrixXd::Zero(w, h);
     MatrixXd G = MatrixXd::Zero(w, h);
     MatrixXd B = MatrixXd::Zero(w, h);
@@ -401,8 +469,8 @@ void raytrace_scene()
     // The sensor grid is at a distance 'focal_length' from the camera center,
     // and covers an viewing angle given by 'field_of_view'.
     double aspect_ratio = double(w) / double(h);
-    double image_y = 1; //TODO: compute the correct pixels size
-    double image_x = 1; //TODO: compute the correct pixels size
+    double image_y = 0.5 * ((focal_length/(acos(field_of_view/2)))/sin(1.5708-field_of_view)) * sin(field_of_view); //TODO: compute the correct pixels size
+    double image_x = aspect_ratio * image_y; //TODO: compute the correct pixels size
 
     // The pixel grid through which we shoot rays is at a distance 'focal_length'
     const Vector3d image_origin(-image_x, image_y, -image_z);
@@ -422,7 +490,8 @@ void raytrace_scene()
 
             if (is_perspective)
             {
-                // TODO: Perspective camera
+                ray_origin = camera_position;
+                ray_direction = (pixel_center - camera_position).normalized();
             }
             else
             {
