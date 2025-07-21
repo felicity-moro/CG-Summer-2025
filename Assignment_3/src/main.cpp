@@ -466,7 +466,7 @@ void raytrace_scene()
     // and covers an viewing angle given by 'field_of_view'.
     double aspect_ratio = double(w) / double(h);
     double image_y = 0.5 * ((focal_length/(acos(field_of_view/2)))/sin(1.5708-field_of_view)) * sin(field_of_view); //TODO: compute the correct pixels size
-    double image_x = aspect_ratio * image_y; //TODO: compute the correct pixels size
+    double image_x = aspect_ratio * image_y; //image w/image height = screen width/screen height
 
     // The pixel grid through which we shoot rays is at a distance 'focal_length'
     const Vector3d image_origin(-image_x, image_y, -image_z);
@@ -483,11 +483,21 @@ void raytrace_scene()
             // Prepare the ray
             Vector3d ray_origin;
             Vector3d ray_direction;
+            Vector4d C(0, 0, 0, 0); // Initialize color to zero
 
-            if (is_perspective)
+            for (int k = 0; k < 10; k++){
+                 if (is_perspective)
             {
                 ray_origin = camera_position;
-                ray_direction = (pixel_center - camera_position).normalized();
+                double rnd = double(rand()) / RAND_MAX;
+
+                ray_origin(0) += camera_aperture * (2.0 * rnd - 1.0);
+
+                rnd = double(rand()) / RAND_MAX;
+                ray_origin(1) += camera_aperture * (2.0 * rnd - 1.0);
+
+                ray_direction = (pixel_center - ray_origin).normalized();
+
             }
             else
             {
@@ -496,7 +506,11 @@ void raytrace_scene()
                 ray_direction = Vector3d(0, 0, -1);
             }
 
-            const Vector4d C = shoot_ray(ray_origin, ray_direction, max_bounce);
+            C += shoot_ray(ray_origin, ray_direction, max_bounce);
+            
+            }
+            C /= 10;
+
             R(i, j) = C(0);
             G(i, j) = C(1);
             B(i, j) = C(2);
